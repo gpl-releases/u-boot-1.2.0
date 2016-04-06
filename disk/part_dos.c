@@ -21,7 +21,10 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
  * MA 02111-1307 USA
  */
-
+ /* 
+ * Includes Intel Corporation's changes/modifications dated: 2012. 
+ * Changed/modified portions - Copyright © 2012 , Intel Corporation.   
+ */ 
 /*
  * Support for harddisk partitions.
  *
@@ -236,6 +239,92 @@ static int get_partition_info_extended (block_dev_desc_t *dev_desc, int ext_part
 	return -1;
 }
 
+/*  Backup partitions table 
+ */
+static void backup_partition_info_extended (block_dev_desc_t *dev_desc, int ext_part_sector, int relative, int part_num,
+				 int* buff_size, char *dest_buff)
+{
+	unsigned char buffer[DEFAULT_SECTOR_SIZE];
+	dos_partition_t *pt;
+	int i;
+
+	if (dev_desc->block_read (dev_desc->dev, ext_part_sector, 1, (ulong *) buffer) != 1) {
+		printf ("** Can't read partition table on %d:%d **\n",
+			dev_desc->dev, ext_part_sector);
+		return;
+	}
+	if (buffer[DOS_PART_MAGIC_OFFSET] != 0x55 ||
+		buffer[DOS_PART_MAGIC_OFFSET + 1] != 0xaa) {
+		printf ("bad MBR sector signature 0x%02x%02x\n",
+			buffer[DOS_PART_MAGIC_OFFSET],
+			buffer[DOS_PART_MAGIC_OFFSET + 1]);
+		return;
+	}
+
+    /* Copy Buffer to backup buffer */
+    memcpy(dest_buff,buffer,DEFAULT_SECTOR_SIZE);
+
+    /* update return value */
+    *buff_size += DEFAULT_SECTOR_SIZE; 
+    
+	/* Follows the extended partitions */
+	pt = (dos_partition_t *) (buffer + DOS_PART_TBL_OFFSET);
+	for (i = 0; i < 4; i++, pt++) {
+		if (is_extended (pt->sys_ind)) {
+			int lba_start = le32_to_int (pt->start4) + relative;
+
+			return backup_partition_info_extended (dev_desc, lba_start,
+				 ext_part_sector == 0 ? lba_start : relative,
+				 part_num, buff_size, dest_buff + DEFAULT_SECTOR_SIZE);
+		}
+	}
+	return;
+}
+
+/* 
+ Resote partitios table
+ */
+static void restore_partition_info_extended (block_dev_desc_t *dev_desc, int ext_part_sector, int relative, int part_num,
+				 int* buff_size, char *src_buff)
+{
+	unsigned char buffer[DEFAULT_SECTOR_SIZE];
+	dos_partition_t *pt;
+	int i;
+
+    /* Copy from backup source to buffer */
+    memcpy(buffer,src_buff,DEFAULT_SECTOR_SIZE);
+
+	if (buffer[DOS_PART_MAGIC_OFFSET] != 0x55 ||
+		buffer[DOS_PART_MAGIC_OFFSET + 1] != 0xaa) {
+		printf ("bad MBR sector signature 0x%02x%02x\n",
+			buffer[DOS_PART_MAGIC_OFFSET],
+			buffer[DOS_PART_MAGIC_OFFSET + 1]);
+		return;
+	}
+
+    if (dev_desc->block_write(dev_desc->dev, ext_part_sector, 1, (ulong *) buffer) != 1) {
+		printf ("** Can't write partition table on %d:%d **\n",
+			dev_desc->dev, ext_part_sector);
+		return;
+	}
+
+    /* update return value */
+    *buff_size += DEFAULT_SECTOR_SIZE; 
+    
+	/* Follows the extended partitions */
+	pt = (dos_partition_t *) (buffer + DOS_PART_TBL_OFFSET);
+	for (i = 0; i < 4; i++, pt++) {
+		if (is_extended (pt->sys_ind)) {
+			int lba_start = le32_to_int (pt->start4) + relative;
+
+			return restore_partition_info_extended (dev_desc, lba_start,
+				 ext_part_sector == 0 ? lba_start : relative,
+				 part_num, buff_size, src_buff + DEFAULT_SECTOR_SIZE);
+		}
+	}
+	return;
+}
+
 void print_part_dos (block_dev_desc_t *dev_desc)
 {
 	printf ("Partition     Start Sector     Num Sectors     Type\n");
@@ -247,5 +336,16 @@ int get_partition_info_dos (block_dev_desc_t *dev_desc, int part, disk_partition
 	return get_partition_info_extended (dev_desc, 0, 0, 1, part, info);
 }
 
+void backup_partition_info_dos (block_dev_desc_t *dev_desc,int *buff_size, char *dest_buff)
+{
+     backup_partition_info_extended(dev_desc,0,0,1,buff_size,dest_buff);
+     return;
+}
+
+void restore_partition_info_dos (block_dev_desc_t *dev_desc,int *buff_size, char *dest_buff)
+{
+     restore_partition_info_extended(dev_desc,0,0,1,buff_size,dest_buff);
+     return;
+}
 
 #endif	/* (CONFIG_COMMANDS & CFG_CMD_IDE) && CONFIG_DOS_PARTITION */

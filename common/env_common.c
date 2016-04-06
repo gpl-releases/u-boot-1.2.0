@@ -24,6 +24,11 @@
  * MA 02111-1307 USA
  */
 
+/* 
+ * Includes Intel Corporation's changes/modifications dated: 2011. 
+ * Changed/modified portions - Copyright © 2011 , Intel Corporation.   
+ */ 
+
 #include <common.h>
 #include <command.h>
 #include <environment.h>
@@ -141,7 +146,7 @@ uchar default_environment[] = {
 	"\0"
 };
 
-#if defined(CFG_ENV_IS_IN_NAND)		/* Environment is in Nand Flash */
+#if defined(CFG_ENV_IS_IN_NAND)	 || defined(CONFIG_ENV_IS_IN_MMC)	/* Environment is in Nand Flash */
 int default_environment_size = sizeof(default_environment);
 #endif
 
@@ -219,9 +224,8 @@ void env_relocate (void)
 	 * We must allocate a buffer for the environment
 	 */
 	env_ptr = (env_t *)malloc (CFG_ENV_SIZE);
-	DEBUGF ("%s[%d] malloced ENV at %p\n", __FUNCTION__,__LINE__,env_ptr);
+	DEBUGF ("%s[%d] malloced ENV at %p, size 0x%x\n", __FUNCTION__,__LINE__,env_ptr,CFG_ENV_SIZE);
 #endif
-
 	/*
 	 * After relocation to RAM, we can always use the "memory" functions
 	 */
@@ -241,13 +245,14 @@ void env_relocate (void)
 			return;
 		}
 
-		memset (env_ptr, 0, sizeof(env_t));
+		memset (env_ptr, 0, CFG_ENV_SIZE);
 		memcpy (env_ptr->data,
 			default_environment,
 			sizeof(default_environment));
 #ifdef CFG_REDUNDAND_ENVIRONMENT
 		env_ptr->flags = 0xFF;
 #endif
+
 		env_crc_update ();
 		gd->env_valid = 1;
 	}

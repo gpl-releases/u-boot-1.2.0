@@ -8,16 +8,42 @@
  * For conditions of distribution and use, see copyright notice in zlib.h
  */
 
+/* -------------------------------------------------------------------------------------
+ * Copyright 2009, Texas Instruments Incorporated
+ *
+ * This program has been modified from its original operation by Texas Instruments
+ * to do the following:
+ *
+ * 1. Change the way the code reads the data, use blocks accesses instead of byte accesses
+ *
+ * THIS MODIFIED SOFTWARE AND DOCUMENTATION ARE PROVIDED
+ * "AS IS," AND TEXAS INSTRUMENTS MAKES NO REPRESENTATIONS
+ * OR WARRENTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+ * TO, WARRANTIES OF MERCHANTABILITY OR FITNESS FOR ANY
+ * PARTICULAR PURPOSE OR THAT THE USE OF THE SOFTWARE OR
+ * DOCUMENTATION WILL NOT INFRINGE ANY THIRD PARTY PATENTS,
+ * COPYRIGHTS, TRADEMARKS OR OTHER RIGHTS.
+ *
+ * These changes are covered as per original license.
+ * ------------------------------------------------------------------------------------- */   
+
+
 #ifndef USE_HOSTCC	/* Shut down "ANSI does not permit..." warnings */
 #include <common.h>	/* to get command definitions like CFG_CMD_JFFS2 */
 #endif
 
 #include "zlib.h"
 
+#if defined(CONFIG_USE_HW_MUTEX)
+#include <puma6_hw_mutex.h>
+#endif
+
+
 #define local static
 #define ZEXPORT	/* empty */
 unsigned long crc32 (unsigned long, const unsigned char *, unsigned int);
 
+#define DYNAMIC_CRC_TABLE
 #ifdef DYNAMIC_CRC_TABLE
 
 local int crc_table_empty = 1;
@@ -130,7 +156,6 @@ local const uLongf crc_table[256] = {
 };
 #endif
 
-#if 0
 /* =========================================================================
  * This function can be used by asm versions of crc32()
  */
@@ -141,7 +166,6 @@ const uLongf * ZEXPORT get_crc_table()
 #endif
   return (const uLongf *)crc_table;
 }
-#endif
 
 /* ========================================================================= */
 #define DO1(buf) crc = crc_table[((int)crc ^ (*buf++)) & 0xff] ^ (crc >> 8);
@@ -155,19 +179,75 @@ uLong ZEXPORT crc32(crc, buf, len)
     const Bytef *buf;
     uInt len;
 {
+#if defined(CONFIG_USE_HW_MUTEX)
+    int mutex_on = 0;
+#endif
 #ifdef DYNAMIC_CRC_TABLE
     if (crc_table_empty)
       make_crc_table();
 #endif
     crc = crc ^ 0xffffffffL;
-    while (len >= 8)
+
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Check if we read from a memory ranges within the SPI Flash */
+    if ( ((buf  >= (Bytef*)CFG_FLASH_BASE) && (buf < ((Bytef*)(CFG_FLASH_BASE + CFG_FLASH_SIZE)))) ||
+         ((buf  <  (Bytef*)CFG_FLASH_BASE) && (buf+len >= (Bytef*)CFG_FLASH_BASE))                 )
+    {
+        /* Lock the HW Mutex */
+        if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+        {
+            printf("crc32: Failed to lock HW Mutex\n");
+            return 0;
+        }
+        mutex_on = 1;
+    }
+#endif
+
+#if defined (CONFIG_TNETC550) || defined(CONFIG_HARBORPARK)
+    /* Hai: This code part is optimized for Puma5 Serial interface flash.
+       It significantly reduces the read time by reading blocks of data and reducing read overhead.
+       It also reduces the code size, by not using the nested DOx macros */
+
+    /* When possible, read data from serial flash in SFI_BUF_SIZE blocks */
+    while (len >= SFI_BUF_SIZE) {
+      /* Use this only if the address is 4-byte aligned */
+      if (!((unsigned)buf & 3)) {
+        unsigned i = SFI_BUF_SIZE;
+        sfi_read_buf_t tmp_buf = *(sfi_read_buf_t *)buf;          
+        unsigned char *pbuf = ( unsigned char *)&tmp_buf;
+
+        /* Perform the calculation on the temporary buffer */
+        while(i-->0) {
+          DO1(pbuf);
+        }
+        len -= SFI_BUF_SIZE;
+        buf += SFI_BUF_SIZE;
+      }
+      else {
+        DO1(buf);
+        len--;
+      }
+    }
+#else
+    while (len >= 8) 
     {
       DO8(buf);
       len -= 8;
     }
+#endif
     if (len) do {
       DO1(buf);
     } while (--len);
+
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Release HW Mutes */
+    if (mutex_on == 1)
+    {
+        hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+        mutex_on = 0;
+    }
+#endif
+
     return crc ^ 0xffffffffL;
 }
 

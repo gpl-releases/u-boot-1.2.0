@@ -15,10 +15,190 @@
  *    reentrant and should be faster). Use only strsep() in new code, please.
  */
 
+/* -------------------------------------------------------------------------------------
+ * Copyright 2009, Texas Instruments Incorporated
+ *
+ * This program has been modified from its original operation by Texas Instruments
+ * to do the following:
+ *
+ * 1. Added an optimized memmove function for Puma5 platform, which reads and writes
+ *    data in blocks and not in bytes.
+ *
+ * THIS MODIFIED SOFTWARE AND DOCUMENTATION ARE PROVIDED
+ * "AS IS," AND TEXAS INSTRUMENTS MAKES NO REPRESENTATIONS
+ * OR WARRENTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+ * TO, WARRANTIES OF MERCHANTABILITY OR FITNESS FOR ANY
+ * PARTICULAR PURPOSE OR THAT THE USE OF THE SOFTWARE OR
+ * DOCUMENTATION WILL NOT INFRINGE ANY THIRD PARTY PATENTS,
+ * COPYRIGHTS, TRADEMARKS OR OTHER RIGHTS.
+ *
+ * These changes are covered as per original license.
+ * ------------------------------------------------------------------------------------- */   
+
 #include <linux/types.h>
 #include <linux/string.h>
 #include <linux/ctype.h>
 #include <malloc.h>
+#include <common.h>
+
+#if defined(CONFIG_USE_HW_MUTEX)
+#include <puma6_hw_mutex.h>
+#endif
+
+#if defined(CONFIG_HARBORPARK)
+void* aligned_memmove(void * dest,const void *src,size_t count)
+{
+    volatile char *dest_byte;
+    volatile char *src_byte;
+    volatile sfi_read_buf_t *src_blk;
+	volatile sfi_read_buf_t *dest_blk;
+
+#if defined(CONFIG_USE_HW_MUTEX)
+    int mutex_on = 0;
+
+    /* Check if we read from a memory ranges within the SPI Flash */
+    if ( ((src  >= (void*)CFG_FLASH_BASE) && (src < ((void*)(CFG_FLASH_BASE + CFG_FLASH_SIZE))))  ||
+         ((src  <  (void*)CFG_FLASH_BASE) && (src+count >= (void*)CFG_FLASH_BASE))              )
+    {
+        /* Lock the HW Mutex */
+        if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+        {
+            printf("memmove: Failed to lock HW Mutex\n");
+            return 0;
+        }
+        mutex_on = 1;
+    }
+#endif
+
+	if (dest <= src) 
+    {
+        /* Move non-aligned data */ 
+		dest_byte = (volatile char *) dest;
+		src_byte = (volatile char *) src;
+        /* if both pointers are not aligned, but have the same remainder, then we can copy and
+               advance the pointers until we get alignment.*/
+        if (((unsigned)dest_byte&0x03) == ((unsigned)src_byte&0x03))
+        {
+            /* Copy until we get alignment (up to 4 loop cycles)*/
+            while (((((unsigned)dest_byte&0x03)!=0) && (((unsigned)src_byte&0x03)!=0)) && (count != 0))
+            {
+                *dest_byte++ = *src_byte++;
+                count--;
+            }
+        }
+        else
+        {
+            /* Copy all in bytes */
+            while (count != 0)
+            {
+                *dest_byte++ = *src_byte++;
+                count--;
+            }
+        }
+
+        /* Move aligned data */
+        dest_blk = (volatile sfi_read_buf_t *)(dest_byte);
+        src_blk  =  (volatile sfi_read_buf_t *)(src_byte);
+       	while( count>=SFI_BUF_SIZE ) 
+        {
+            *dest_blk++ = *src_blk++;
+            count-=SFI_BUF_SIZE;
+        }
+        /* Move the the rest of non-aligned tail data */
+        dest_byte = (char *) dest_blk;
+		src_byte = (char *) src_blk;
+        while(count != 0) 
+        {
+            *dest_byte++ = *src_byte++;
+            count--;
+        }
+    }
+	else 
+    {
+        dest_byte = (volatile char *) dest + count;
+		src_byte = (volatile char *) src + count;
+		/* if both pointers are not aligned, but have the same remainder, then we can copy and
+               advance the pointers until we get alignment.*/
+        if (((unsigned)dest_byte&0x03) == ((unsigned)src_byte&0x03))
+        {
+            /* Copy until we get alignment (up to 4 loop cycles)*/
+            while (((((unsigned)dest_byte&0x03)!=0) && (((unsigned)src_byte&0x03)!=0)) && (count != 0))
+            {
+                *--dest_byte = *--src_byte;
+                count--;
+            }
+        }
+        else
+        {
+            /* Copy all in bytes */
+            while (count != 0)
+            {
+                *--dest_byte = *--src_byte;
+                count--;
+            }
+        }
+
+        /* Move aligned data */
+        dest_blk = (volatile sfi_read_buf_t *)(dest_byte);
+        src_blk  =  (volatile sfi_read_buf_t *)(src_byte);
+        while( count>=SFI_BUF_SIZE ) 
+        {
+            *--dest_blk = *--src_blk;
+            count-=SFI_BUF_SIZE;
+        }
+
+         /* Move the non-aligned tail data */
+        dest_byte = (volatile char *) dest_blk;
+		src_byte = (volatile char *) src_blk;
+        while(count != 0) 
+		{
+            *--dest_byte = *--src_byte;
+            count--;
+        }
+	}
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Release HW Mutes */
+    if (mutex_on == 1)
+    {
+        hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+        mutex_on = 0;
+    }
+#endif
+
+    //printf("done\n");
+	return dest;
+}
+#else 
+#if defined CONFIG_TNETC550 
+/* Hai: This code part is optimized for Puma5 Serial flash.
+   It significantly reduces the read time by reading blocks of data and reducing read overhead. */
+
+void * aligned_memmove(void * dest,const void *src,size_t count)
+{
+	sfi_read_buf_t *src_blk = (sfi_read_buf_t *)((char *)src + count);
+	sfi_read_buf_t *dest_blk = (sfi_read_buf_t *)((char *)dest + count);
+
+	/* Read data in bursts */
+	while( count>=SFI_BUF_SIZE ) {
+		*--dest_blk = *--src_blk;
+		count-=SFI_BUF_SIZE;
+	}
+
+	/* Read the last bytes */
+	if(count) {
+		char *tmp = (char *) dest_blk;
+		char *s = (char *) src_blk;
+	
+		while(count--) {
+			*--tmp = *--s;
+		}
+	}
+	return dest;
+}
+
+#endif
+#endif
+
 
 
 #if 0 /* not used - was: #ifndef __HAVE_ARCH_STRNICMP */
@@ -470,6 +650,10 @@ void * memmove(void * dest,const void *src,size_t count)
 {
 	char *tmp, *s;
 
+#if defined(CONFIG_HARBORPARK)
+    return aligned_memmove( dest,src,count );
+#endif
+
 	if (dest <= src) {
 		tmp = (char *) dest;
 		s = (char *) src;
@@ -477,6 +661,12 @@ void * memmove(void * dest,const void *src,size_t count)
 			*tmp++ = *s++;
 		}
 	else {
+#if defined CONFIG_TNETC550
+		/* This is the only use-case we take care in Puma5 */
+        if( !((unsigned)(dest) & 3) && !((unsigned)(src) & 3) && !(count & 3) ) {
+			return aligned_memmove( dest,src,count );
+		}
+#endif
 		tmp = (char *) dest + count;
 		s = (char *) src + count;
 		while (count--)

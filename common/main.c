@@ -350,8 +350,17 @@ void main_loop (void)
 #ifdef CONFIG_VERSION_VARIABLE
 	{
 		extern char version_string[];
+		char *current_ver;
 
-		setenv ("ver", version_string);  /* set version variable */
+		current_ver = getenv( "ver" );
+
+		/* set version variable in case it is not set or outdated */
+		if( !current_ver || strcmp( current_ver, version_string ) ) {
+			setenv ("ver", version_string);
+#ifndef CFG_NO_FLASH
+			saveenv();
+#endif
+		}
 	}
 #endif /* CONFIG_VERSION_VARIABLE */
 

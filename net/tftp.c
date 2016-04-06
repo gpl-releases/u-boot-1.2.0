@@ -266,6 +266,7 @@ TftpHandler (uchar * pkt, unsigned dest, unsigned src, unsigned len)
 		}
 
 		TftpLastBlock = TftpBlock;
+
 		NetSetTimeout (TIMEOUT * CFG_HZ, TftpTimeout);
 
 		store_block (TftpBlock - 1, pkt + 2, len);

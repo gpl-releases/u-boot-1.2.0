@@ -40,8 +40,12 @@ Handle NewHandle (unsigned int numBytes)
 		hanPtr->size = numBytes;
 		return (Handle) hanPtr;
 	} else {
-		free (memPtr);
-		free (hanPtr);
+		if(memPtr) {
+			free (memPtr);
+		}
+		if(hanPtr) {
+			free (hanPtr);
+		}
 		return NULL;
 	}
 }

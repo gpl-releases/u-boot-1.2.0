@@ -21,6 +21,12 @@
  * MA 02111-1307 USA
  */
 
+/* 
+ * Includes Intel Corporation's changes/modifications dated: 2011. 
+ * Changed/modified portions - Copyright � 2011 , Intel Corporation.   
+ */ 
+
+
 /*
  * Boot support
  */
@@ -36,6 +42,13 @@
 
 #ifdef CONFIG_OF_FLAT_TREE
 #include <ft_build.h>
+#endif
+#if defined(CONFIG_USE_HW_MUTEX)
+#include <puma6_hw_mutex.h>
+#endif
+#ifdef CONFIG_GENERIC_MMC
+#include <mmc.h>
+#include <arm_atom_mbx.h> /* Need this only for the MMC case */
 #endif
 
 DECLARE_GLOBAL_DATA_PTR;
@@ -158,12 +171,25 @@ int do_bootm (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	ulong  *len_ptr;
 	uint	unc_len = CFG_BOOTM_LEN;
 	int	i, verify;
+    int mmc_boot;
 	char	*name, *s;
 	int	(*appl)(int, char *[]);
 	image_header_t *hdr = &header;
+#if defined(CONFIG_USE_HW_MUTEX)
+    int mutex_on = 0;
+#endif
 
+#ifdef CONFIG_GENERIC_MMC
+    char blk_buffer[CONFIG_MMC_BLOCK_SIZE*2];
+    ulong addr_align;
+    int   addr_gap;
+#endif
 	s = getenv ("verify");
 	verify = (s && (*s == 'n')) ? 0 : 1;
+
+    s = getenv ("bootdevice");
+	mmc_boot = (s && (strcmp(s,"mmc") == 0)) ? 1 : 0;
+
 
 	if (argc < 2) {
 		addr = load_addr;
@@ -180,6 +206,21 @@ int do_bootm (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 		read_dataflash(addr, sizeof(image_header_t), (char *)&header);
 	} else
 #endif
+
+#ifdef CONFIG_GENERIC_MMC
+    if (mmc_boot == 1)
+    {
+        /* copy Image Header from emmc to &header */
+        addr_align = addr & 0xFFFFFE00;      /* allign to mmc block size*/
+        addr_gap   = addr & 0x1FF;           /* gap after alignment*/
+        /* printf("[DEBUG] addr:0x%X, addr_align:0x%X, addr_gap:0x%X \n",addr,addr_align,addr_gap); */ 
+        /* printf("[DEBUG] mmc_read (header) from:0x%X to:0x%X len:0x%X\n",addr_align,(uchar*)blk_buffer, CONFIG_MMC_BLOCK_SIZE*2); */
+        mmc_read(CONFIG_SYS_MMC_IMG_DEV, addr_align, (uchar*)blk_buffer, CONFIG_MMC_BLOCK_SIZE*2);
+        /* printf("[DEBUG] memcpy (header) from:0x%X to:0x%X len:0x%X\n",blk_buffer+addr_gap,hdr,sizeof(image_header_t)); */
+        memcpy(&header,blk_buffer + addr_gap, sizeof(image_header_t));
+    }
+    else
+#endif
 	memmove (&header, (char *)addr, sizeof(image_header_t));
 
 	if (ntohl(hdr->ih_magic) != IH_MAGIC) {
@@ -194,9 +235,9 @@ int do_bootm (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 		} else
 #endif	/* __I386__ */
 	    {
-		puts ("Bad Magic Number\n");
-		SHOW_BOOT_PROGRESS (-1);
-		return 1;
+    		puts ("Bad Magic Number\n");
+    		SHOW_BOOT_PROGRESS (-1);
+    		return 1;
 	    }
 	}
 	SHOW_BOOT_PROGRESS (2);
@@ -214,12 +255,55 @@ int do_bootm (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	}
 	SHOW_BOOT_PROGRESS (3);
 
+    /*printf ("[Debug-Uboot] ntohl(hdr->ih_ep)=%p ntohl(hdr->ih_load)=%p PHYS_SDRAM_1=%p\n", ntohl(hdr->ih_ep) , ntohl(hdr->ih_load), PHYS_SDRAM_1);*/
+
+    /* In some SoC the UBFI header holds a load offset vs. a load address (in RAM), so a RAM base fix is needed */
+    /* This fix must be after the header checksum. */
+    hdr->ih_ep = htonl(ntohl(hdr->ih_ep) + UBFI_LINUX_LOAD_ADDR_FIX);
+    hdr->ih_load = htonl(ntohl(hdr->ih_load) + UBFI_LINUX_LOAD_ADDR_FIX);
+
+    /*printf ("[Debug-Uboot] ntohl(hdr->ih_ep)=%p ntohl(hdr->ih_load)=%p\n", ntohl(hdr->ih_ep) , ntohl(hdr->ih_load));*/
+
 #ifdef CONFIG_HAS_DATAFLASH
 	if (addr_dataflash(addr)){
 		len  = ntohl(hdr->ih_size) + sizeof(image_header_t);
 		read_dataflash(addr, len, (char *)CFG_LOAD_ADDR);
 		addr = CFG_LOAD_ADDR;
 	}
+#endif
+
+#ifdef CONFIG_GENERIC_MMC
+    if (mmc_boot == 1)
+    {
+        int kernel_len = 0;
+        int array_len = 0;
+        ulong* imgs_array_ptr = 0;
+
+        /* copy image (Header+data) to RAM from emmc */
+        addr_align = addr & 0xFFFFFE00;    /* allign to mmc block size*/
+        addr_gap   = addr & 0x1FF;         /* gap after alignment*/
+
+		/* 'blk_buffer + addr_gap ' points to start of header */
+        imgs_array_ptr = (ulong*)(blk_buffer + addr_gap + sizeof(image_header_t)); /* Get pointer to images size array */
+        kernel_len = ntohl(imgs_array_ptr[0]);                                     /* The first image size in the array is the kernel size */
+        while (imgs_array_ptr[array_len] != 0)                                     /* run over the entire array (null-terminator) to calculate the array size */
+        {
+            array_len++;
+        }
+        array_len++; /* add one to array size because of null termintor cell */
+
+        len  = addr_gap + sizeof(image_header_t) + (array_len*sizeof(ulong*)) + kernel_len;         /* calculate total size in bytes */ 
+
+        /* printf ("[Debug-Uboot] Copy image from emmc 0x%0.8X to RAM 0x%0.8X ,length=%d, gap=%d \n",addr_align,(uchar*)CFG_EMMC_LOAD_ADDR, len , addr_gap); */
+
+        /* Read image from eMMC to DDR */
+        mmc_read(CONFIG_SYS_MMC_IMG_DEV, addr_align, (uchar*)CFG_EMMC_LOAD_ADDR, len);
+
+        addr = CFG_EMMC_LOAD_ADDR + addr_gap; /* set addr to new position in DDR */
+    }
+    /* Update the ARM11 MBOX that the emmc init is done. */
+    printf("ARM MBX sending 'eMMC done.' notification...\n");
+    PUMA6_ARM11_MBOX_UPDATE_EVENT(ARM11_EVENT_EMMC_INIT_EXIT);
 #endif
 
 
@@ -283,13 +367,33 @@ int do_bootm (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	case IH_TYPE_KERNEL:
 		name = "Kernel Image";
 		break;
-	case IH_TYPE_MULTI:
+    case IH_TYPE_MULTI:
+#if defined(CONFIG_USE_HW_MUTEX)
+    if ((len_ptr >= CFG_FLASH_BASE) && (len_ptr < (CFG_FLASH_BASE + CFG_FLASH_SIZE)))
+    {
+        /* Lock the HW Mutex */
+        if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+        {
+            puts("Failed to lock HW Mutex\n");
+            return 1;
+        }
+        mutex_on = 1;
+    }
+#endif
 		name = "Multi-File Image";
 		len  = ntohl(len_ptr[0]);
 		/* OS kernel is always the first image */
 		data += 8; /* kernel_len + terminator */
 		for (i=1; len_ptr[i]; ++i)
 			data += 4;
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Release HW Mutes */
+    if (mutex_on == 1)
+    {
+        mutex_on = 0;
+        hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+    }
+#endif
 		break;
 	default: printf ("Wrong Image Type for %s command\n", cmdtp->name);
 		SHOW_BOOT_PROGRESS (-5);
@@ -338,6 +442,7 @@ int do_bootm (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 			}
 #else	/* !(CONFIG_HW_WATCHDOG || CONFIG_WATCHDOG) */
 			memmove ((void *) ntohl(hdr->ih_load), (uchar *)data, len);
+            /*printf ("[Debug-Uboot] Copy from data=%p to ih_load=%p size=%u\n", data, ntohl(hdr->ih_load), len);*/
 #endif	/* CONFIG_HW_WATCHDOG || CONFIG_WATCHDOG */
 		}
 		break;
@@ -1249,9 +1354,18 @@ int do_imls (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 			goto next_bank;
 		for (j=0; j<info->sector_count; ++j) {
 
+#if defined(CONFIG_USE_HW_MUTEX)
+            /* Lock the HW Mutex */
+            if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+            {
+                puts("Failed to lock HW Mutex\n");
+                return 1;
+            }
+#endif
 			if (!(hdr=(image_header_t *)info->start[j]) ||
 			    (ntohl(hdr->ih_magic) != IH_MAGIC))
 				goto next_sector;
+
 
 			/* Copy header so we can blank CRC field for re-calculation */
 			memmove (&header, (char *)hdr, sizeof(image_header_t));
@@ -1275,6 +1389,10 @@ int do_imls (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 			}
 			puts ("OK\n");
 next_sector:		;
+#if defined(CONFIG_USE_HW_MUTEX)
+            /* Release HW Mutes */
+            hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+#endif
 		}
 next_bank:	;
 	}
@@ -1297,6 +1415,20 @@ print_image_hdr (image_header_t *hdr)
 #if (CONFIG_COMMANDS & CFG_CMD_DATE) || defined(CONFIG_TIMESTAMP)
 	time_t timestamp = (time_t)ntohl(hdr->ih_time);
 	struct rtc_time tm;
+#endif
+
+#if defined(CONFIG_USE_HW_MUTEX)
+    int mutex_on = 0;
+    if ((hdr >= CFG_FLASH_BASE) && (hdr < (CFG_FLASH_BASE + CFG_FLASH_SIZE)))
+    {
+        /* Lock the HW Mutex */
+        if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+        {
+            puts("Failed to lock HW Mutex\n");
+            return;
+        }
+        mutex_on = 1;
+    }
 #endif
 
 	printf ("   Image Name:   %.*s\n", IH_NMLEN, hdr->ih_name);
@@ -1324,6 +1456,14 @@ print_image_hdr (image_header_t *hdr)
 			print_size (len, "\n");
 		}
 	}
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Release HW Mutes */
+    if (mutex_on == 1)
+    {
+        mutex_on = 0;
+        hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+    }
+#endif
 }
 
 

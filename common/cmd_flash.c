@@ -219,8 +219,13 @@ flash_fill_sect_ranges (ulong addr_first, ulong addr_last,
 		short s_end;
 
 		if (info->flash_id == FLASH_UNKNOWN) {
+			rcode = 1;
 			continue;
 		}
+		else {
+			rcode = 0;
+		}
+
 
 		b_end = info->start[0] + info->size - 1;	/* bank end addr */
 		s_end = info->sector_count - 1;			/* last sector   */
@@ -264,7 +269,7 @@ flash_fill_sect_ranges (ulong addr_first, ulong addr_last,
 			addr_first = (sect == s_end) ? b_end + 1: info->start[sect + 1];
 			(*s_count) += s_last[bank] - s_first[bank] + 1;
 		} else if (addr_first >= info->start[0] && addr_first < b_end) {
-			puts ("Error: start address not on sector boundary\n");
+			puts ("Error: start address not on sector boundary\n");			
 			rcode = 1;
 			break;
 		} else if (s_last[bank] >= 0) {

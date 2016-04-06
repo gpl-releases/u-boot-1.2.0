@@ -87,6 +87,27 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
+
+/* -------------------------------------------------------------------------------------
+ * Copyright 2009, Texas Instruments Incorporated
+ *
+ * This program has been modified from its original operation by Texas Instruments
+ * to do the following:
+ *
+ * 1. Added an option to use static ifs in order to reduce the parsing time in 
+ *    embedded systems
+ *
+ * THIS MODIFIED SOFTWARE AND DOCUMENTATION ARE PROVIDED
+ * "AS IS," AND TEXAS INSTRUMENTS MAKES NO REPRESENTATIONS
+ * OR WARRENTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+ * TO, WARRANTIES OF MERCHANTABILITY OR FITNESS FOR ANY
+ * PARTICULAR PURPOSE OR THAT THE USE OF THE SOFTWARE OR
+ * DOCUMENTATION WILL NOT INFRINGE ANY THIRD PARTY PATENTS,
+ * COPYRIGHTS, TRADEMARKS OR OTHER RIGHTS.
+ *
+ * These changes are covered as per original license.
+ * ------------------------------------------------------------------------------------- */   
+
 #define __U_BOOT__
 #ifdef __U_BOOT__
 #include <malloc.h>         /* malloc, free, realloc*/
@@ -3135,9 +3156,12 @@ void mapset(const unsigned char *set, int code)
 
 void update_ifs_map(void)
 {
+#ifndef CFG_HUSH_STATIC_MAP
 	/* char *ifs and char map[256] are both globals. */
 	ifs = (uchar *)getenv("IFS");
-	if (ifs == NULL) ifs=(uchar *)" \t\n";
+	if (ifs == NULL) 
+#endif
+		ifs=(uchar *)" \t\n";
 	/* Precompute a list of 'flow through' behavior so it can be treated
 	 * quickly up front.  Computation is necessary because of IFS.
 	 * Special case handling of IFS == " \t\n" is not implemented.

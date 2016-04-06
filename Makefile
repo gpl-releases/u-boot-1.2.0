@@ -21,6 +21,28 @@
 # MA 02111-1307 USA
 #
 
+# Copyright 2008, Texas Instruments Incorporated
+#
+# This program has been modified from its original operation by Texas Instruments
+# to do the following:
+# tnetc550 build.
+# Cat Mountain harborpark Board
+#
+#
+# THIS MODIFIED SOFTWARE AND DOCUMENTATION ARE PROVIDED
+# "AS IS," AND TEXAS INSTRUMENTS MAKES NO REPRESENTATIONS
+# OR WARRENTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+# TO, WARRANTIES OF MERCHANTABILITY OR FITNESS FOR ANY
+# PARTICULAR PURPOSE OR THAT THE USE OF THE SOFTWARE OR
+# DOCUMENTATION WILL NOT INFRINGE ANY THIRD PARTY PATENTS,
+# COPYRIGHTS, TRADEMARKS OR OTHER RIGHTS.
+# See The GNU General Public License for more details.
+#
+# These changes are covered under version 2 of the GNU General Public License,
+# dated June 1991.
+#
+export CONFIG_ARM_AVALANCHE_KERNEL_PARAMS_ADDRESS=0x50000100
+export CONFIG_ARM_AVALANCHE_SDRAM_ADDRESS=0x50000000
 VERSION = 1
 PATCHLEVEL = 2
 SUBLEVEL = 0
@@ -203,6 +225,7 @@ LIBS += dtt/libdtt.a
 LIBS += drivers/libdrivers.a
 LIBS += drivers/nand/libnand.a
 LIBS += drivers/nand_legacy/libnand_legacy.a
+LIBS += drivers/mmc/libmmc.a
 ifeq ($(CPU),mpc83xx)
 LIBS += drivers/qe/qe.a
 endif
@@ -261,8 +284,8 @@ $(obj)u-boot.dis:	$(obj)u-boot
 
 $(obj)u-boot:		depend version $(SUBDIRS) $(OBJS) $(LIBS) $(LDSCRIPT)
 		UNDEF_SYM=`$(OBJDUMP) -x $(LIBS) |sed  -n -e 's/.*\(__u_boot_cmd_.*\)/-u\1/p'|sort|uniq`;\
-		cd $(LNDIR) && $(LD) $(LDFLAGS) $$UNDEF_SYM $(__OBJS) \
-			--start-group $(__LIBS) --end-group $(PLATFORM_LIBS) \
+		cd $(LNDIR) && $(LD) $(LDFLAGS) 0x51fb0000 $$UNDEF_SYM $(__OBJS) \
+			--start-group $(__LIBS) --end-group $(PLATFORM_LIBS) --gc-sections \
 			-Map u-boot.map -o u-boot
 
 $(OBJS):
@@ -1777,6 +1800,108 @@ ppmc7xx_config: unconfig
 #========================================================================
 # ARM
 #========================================================================
+
+#########################################################################
+## Puma Cable Modem Systems
+#########################################################################
+
+tnetc550_volcano_config	\
+tnetc550_volcano_spiflash_config	\
+tnetc550_qt_config	\
+tnetc550_extclk_config 	\
+tnetc550w_config \
+tnetc550_config	: unconfig
+	@mkdir -p $(obj)include
+	@ >$(obj)include/config.h
+	@[ -z "$(findstring _extclk_,$@)" ] || \
+		{ echo "#define CFG_EXTERNAL_CLK"	>>$(obj)include/config.h ; \
+		  echo "Using external clock..." ; \
+		  echo "#define CONFIG_SPI_FLASH"	>>$(obj)include/config.h ; \
+		  echo "Using SPI FLASH..." ; \
+		}
+	@[ -z "$(findstring _volcano_,$@)" ] || \
+		{ echo "#define CONFIG_PUMA5_VOLCANO_EMU"	>>$(obj)include/config.h ; \
+		  echo "Setting up Volcano build..." ; \
+		}
+	@[ -z "$(findstring _qt_,$@)" ] || \
+		{ echo "#define CONFIG_PUMA5_QT_EMU"	>>$(obj)include/config.h ; \
+		  echo "Setting up Quickturn build..." ; \
+		}
+	@[ -z "$(findstring _spiflash_,$@)" ] || \
+		{ echo "#define CONFIG_SPI_FLASH"	>>$(obj)include/config.h ; \
+		  echo "Using SPI FLASH..." ; \
+		}
+	@[ -z "$(findstring tnetc550_config,$@)" ] || \
+		{ echo "#define CONFIG_SPI_FLASH"	>>$(obj)include/config.h ; \
+		}
+	@[ -z "$(findstring tnetc550w_config,$@)" ] || \
+		{ echo "#define CONFIG_SPI_FLASH"	>>$(obj)include/config.h ; \
+		}
+ifneq ($(DOCSIS_SOC), PUMA6)
+ifdef CONFIG_TI_BBU
+	@echo "#define CONFIG_TI_BBU"	>>$(obj)include/config.h ;
+endif
+endif
+ifdef CONFIG_ARM_AVALANCHE_SDRAM_ADDRESS
+	@echo "#define CONFIG_ARM_AVALANCHE_SDRAM_ADDRESS $(CONFIG_ARM_AVALANCHE_SDRAM_ADDRESS)"	>>$(obj)include/config.h ;
+endif
+ifdef CONFIG_ARM_AVALANCHE_KERNEL_PARAMS_ADDRESS
+	@echo "#define CONFIG_ARM_AVALANCHE_KERNEL_PARAMS_ADDRESS $(CONFIG_ARM_AVALANCHE_KERNEL_PARAMS_ADDRESS)"	>>$(obj)include/config.h ;
+endif
+ifdef CONFIG_TI_PSPUBOOT_DDR_ASYNC_MODE
+	@echo "#define CONFIG_TI_PSPUBOOT_DDR_ASYNC_MODE"	>>$(obj)include/config.h ;
+endif
+ifdef CONFIG_TI_PSPUBOOT_NO_FLASH
+	@echo "#define CFG_NO_FLASH"	>>$(obj)include/config.h ;
+	@echo "#define CONFIG_SKIP_RELOCATE_UBOOT"	>>$(obj)include/config.h ;
+endif
+	@$(MKCONFIG) -a tnetc550 arm arm1176 tnetc550 NULL puma5
+
+
+harborpark_config: unconfig
+	@mkdir -p $(obj)include
+	@ >$(obj)include/config.h
+	@echo "#define CONFIG_SPI_FLASH"	>>$(obj)include/config.h ; 
+	@echo "#define CONFIG_SKIP_RELOCATE_UBOOT"	>>$(obj)include/config.h ;
+	@echo "#define CONFIG_SKIP_LOWLEVEL_INIT"   	>>$(obj)include/config.h ;
+ifneq ($(DOCSIS_SOC), PUMA6)
+ifdef CONFIG_TI_BBU
+	@echo "#define CONFIG_TI_BBU"	    >>$(obj)include/config.h ;
+endif
+endif
+ifdef CONFIG_ARM_AVALANCHE_SDRAM_ADDRESS
+	@echo "#define CONFIG_ARM_AVALANCHE_SDRAM_ADDRESS $(CONFIG_ARM_AVALANCHE_SDRAM_ADDRESS)"	>>$(obj)include/config.h ;
+endif
+ifdef CONFIG_ARM_AVALANCHE_KERNEL_PARAMS_ADDRESS
+	@echo "#define CONFIG_ARM_AVALANCHE_KERNEL_PARAMS_ADDRESS $(CONFIG_ARM_AVALANCHE_KERNEL_PARAMS_ADDRESS)"	>>$(obj)include/config.h ;
+endif
+ifdef CONFIG_TI_PSPUBOOT_DDR_ASYNC_MODE
+	@echo "#define CONFIG_TI_PSPUBOOT_DDR_ASYNC_MODE"	>>$(obj)include/config.h ;
+endif
+ifdef CONFIG_TI_PSPUBOOT_NO_FLASH
+	@echo "#define CFG_NO_FLASH"	>>$(obj)include/config.h ;
+endif
+
+ifdef CONFIG_GENERIC_MMC
+	@echo "#define CONFIG_GENERIC_MMC   1"	>>$(obj)include/config.h ;    
+endif
+ifdef CONFIG_SYSTEM_PUMA6_SOC
+	@echo "#define CONFIG_SYSTEM_PUMA6_SOC"	>>$(obj)include/config.h ;    
+endif
+ifdef CONFIG_MACH_PUMA6_FPGA
+	@echo "#define CONFIG_MACH_PUMA6_FPGA"	>>$(obj)include/config.h ;    
+endif
+
+#CISCO ADD BEGIN
+ifdef CONFIG_VENDOR_UBOOT_VERSION
+	@echo "#define CONFIG_VENDOR_UBOOT_VERSION $(CONFIG_VENDOR_UBOOT_VERSION)"	>>$(obj)include/config.h ;
+endif
+#CISCO ADD END
+
+	@$(MKCONFIG) -a harborpark arm arm1176 harborpark NULL puma6
+
+
+
 #########################################################################
 ## StrongARM Systems
 #########################################################################

@@ -34,7 +34,8 @@ The DEVICEx_NAME constants define which MTD character devices are to
 be used to access the environment.
 
 The DEVICEx_OFFSET constants define the environment offset within the
-MTD character device.
+MTD character device.  Note that if your Linux kernel is compiled with
+MTD PARTITION support, this value will probably be 0
 
 ENVx_SIZE defines the size in bytes taken by the environment, which
 may be less then flash sector size, if the environment takes less

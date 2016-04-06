@@ -48,10 +48,12 @@
 # if defined(CFG_ENV_ADDR_REDUND) && !defined(CFG_ENV_SIZE_REDUND)
 #  define CFG_ENV_SIZE_REDUND	CFG_ENV_SIZE
 # endif
+#if 0 /* Disabled this for dynamic sector size support */
 # if (CFG_ENV_ADDR >= CFG_MONITOR_BASE) && \
      ((CFG_ENV_ADDR + CFG_ENV_SIZE) <= (CFG_MONITOR_BASE + CFG_MONITOR_LEN))
 #  define ENV_IS_EMBEDDED	1
 # endif
+#endif
 # if defined(CFG_ENV_ADDR_REDUND) || defined(CFG_ENV_OFFSET_REDUND)
 #  define CFG_REDUNDAND_ENVIRONMENT	1
 # endif
@@ -63,7 +65,7 @@
 # define ENV_HEADER_SIZE	(sizeof(unsigned long))
 #endif
 
-#define ENV_SIZE (CFG_ENV_SIZE - ENV_HEADER_SIZE)
+#define ENV_SIZE (CFG_ENV_SIZE_MAX - ENV_HEADER_SIZE)
 
 
 extern unsigned long crc32 (unsigned long, const unsigned char *, unsigned int);
@@ -78,8 +80,8 @@ int main (int argc, char **argv)
 #ifdef	ENV_IS_EMBEDDED
 	int crc;
 	unsigned char *envptr = &environment,
-		*dataptr = envptr + ENV_HEADER_SIZE;
-	unsigned int datasize = ENV_SIZE;
+	*dataptr = envptr + ENV_HEADER_SIZE;
+	unsigned int datasize = ( CFG_ENV_SIZE - ENV_HEADER_SIZE );
 
 	crc = crc32 (0, dataptr, datasize);
 

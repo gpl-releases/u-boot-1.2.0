@@ -25,6 +25,11 @@
  * MA 02111-1307 USA
  */
 
+/* 
+ * Includes Intel Corporation's changes/modifications dated: 2011. 
+ * Changed/modified portions - Copyright © 2011 , Intel Corporation.   
+ */ 
+
 /*
  * To match the U-Boot user interface on ARM platforms to the U-Boot
  * standard (as on PPC platforms), some messages with debug character
@@ -299,6 +304,11 @@ void start_armboot (void)
 #if (CONFIG_COMMANDS & CFG_CMD_NAND)
 	puts ("NAND:  ");
 	nand_init();		/* go init the NAND */
+#endif
+
+#ifdef CONFIG_GENERIC_MMC
+    puts("MMC:   ");    
+    mmc_initialize(gd->bd);
 #endif
 
 #ifdef CONFIG_HAS_DATAFLASH

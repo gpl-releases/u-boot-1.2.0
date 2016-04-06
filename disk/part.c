@@ -20,6 +20,10 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
  * MA 02111-1307 USA
  */
+ /* 
+ * Includes Intel Corporation's changes/modifications dated: 2012. 
+ * Changed/modified portions - Copyright © 2012 , Intel Corporation.   
+ */ 
 
 #include <common.h>
 #include <command.h>
@@ -126,6 +130,7 @@ void dev_print (block_dev_desc_t *dev_desc)
 #if ((CONFIG_COMMANDS & CFG_CMD_IDE)	|| \
      (CONFIG_COMMANDS & CFG_CMD_SCSI)	|| \
      (CONFIG_COMMANDS & CFG_CMD_USB)	|| \
+     defined(CONFIG_MMC) || \
      defined(CONFIG_SYSTEMACE)          )
 
 #if defined(CONFIG_MAC_PARTITION) || \
@@ -135,6 +140,11 @@ void dev_print (block_dev_desc_t *dev_desc)
 
 void init_part (block_dev_desc_t * dev_desc)
 {
+    if ( dev_desc->part_type != PART_TYPE_UNKNOWN) 
+    {
+        /* All ready initialized */
+        return;
+    }
 #ifdef CONFIG_ISO_PARTITION
 	if (test_part_iso(dev_desc) == 0) {
 		dev_desc->part_type = PART_TYPE_ISO;
@@ -224,6 +234,8 @@ static void print_part_header (const char *type, block_dev_desc_t * dev_desc)
 					break;
 		case IF_TYPE_DOC:	puts ("DOC");
 					break;
+        case IF_TYPE_MMC:	puts ("MMC");
+					break;
 		default: 		puts ("UNKNOWN");
 					break;
 	}
@@ -264,6 +276,38 @@ void print_part (block_dev_desc_t * dev_desc)
 	    print_part_header ("AMIGA", dev_desc);
 	    print_part_amiga (dev_desc);
 	    return;
+#endif
+	}
+	puts ("## Unknown partition table\n");
+}
+
+void backup_part (block_dev_desc_t * dev_desc,int *buff_size, char* dest_buff)
+{
+
+    switch (dev_desc->part_type) {
+
+#ifdef CONFIG_DOS_PARTITION
+	case PART_TYPE_DOS:
+        backup_partition_info_dos(dev_desc,buff_size,dest_buff);
+		return;
+#endif
+	}
+	puts ("## Unknown partition table\n");
+}
+
+void restore_part (block_dev_desc_t * dev_desc,int *buff_size, char* src_buff)
+{
+#ifdef CONFIG_DOS_PARTITION
+    /* Set default partition type */
+    dev_desc->part_type = PART_TYPE_DOS;
+#endif
+
+    switch (dev_desc->part_type) {
+
+#ifdef CONFIG_DOS_PARTITION
+	case PART_TYPE_DOS:
+        restore_partition_info_dos(dev_desc,buff_size,src_buff);
+		return;
 #endif
 	}
 	puts ("## Unknown partition table\n");

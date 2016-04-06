@@ -47,6 +47,14 @@
 #include <hush.h>
 #endif
 
+#if defined(CONFIG_USE_HW_MUTEX)
+#include <puma6_hw_mutex.h>
+#endif
+
+#ifdef CONFIG_GENERIC_MMC
+#include <mmc.h>
+#endif
+
 #if defined(CONFIG_AUTOSCRIPT) || \
 	 (CONFIG_COMMANDS & CFG_CMD_AUTOSCRIPT )
 
@@ -60,11 +68,36 @@ autoscript (ulong addr)
 	char *cmd;
 	int rcode = 0;
 	int verify;
+    int mmc_boot;
+#if defined(CONFIG_USE_HW_MUTEX)
+    int mutex_on = 0;
+#endif
+#ifdef CONFIG_GENERIC_MMC
+    char  blk_buffer[CONFIG_MMC_BLOCK_SIZE*2];
+    ulong addr_align;
+    int   addr_gap;
+#endif
 
-	cmd = getenv ("verify");
-	verify = (cmd && (*cmd == 'n')) ? 0 : 1;
+    cmd = getenv ("verify");
+    verify = (cmd && (*cmd == 'n')) ? 0 : 1;
+    
+    cmd = getenv ("bootdevice");
+    mmc_boot = (cmd && (strcmp(cmd,"mmc") == 0)) ? 1 : 0;
 
-
+#ifdef CONFIG_GENERIC_MMC
+    if (mmc_boot == 1)
+    {
+        /* copy Image Header from emmc to &header */
+        addr_align = addr & 0xFFFFFE00; /* allign to mmc block size*/
+        addr_gap   = addr & 0x1FF;      /* gap after alignment*/
+        /*printf("[DEBUG] addr:0x%X, addr_align:0x%X, addr_gap:0x%X \n",addr,addr_align,addr_gap); */
+        /*printf("[DEBUG] mmc_read (header) from:0x%X to:0x%X len:0x%X\n",addr_align,(uchar*)blk_buffer, CONFIG_MMC_BLOCK_SIZE*2);*/
+        mmc_read(CONFIG_SYS_MMC_IMG_DEV, addr_align, (uchar*)blk_buffer, CONFIG_MMC_BLOCK_SIZE*2);
+        /*printf("[DEBUG] memcpy (header) from:0x%X to:0x%X len:0x%X\n",blk_buffer+addr_gap,hdr,sizeof(image_header_t));*/
+        memcpy(hdr,blk_buffer+addr_gap,sizeof(image_header_t));
+    }
+    else
+#endif
 	memmove (hdr, (char *)addr, sizeof(image_header_t));
 
 	if (ntohl(hdr->ih_magic) != IH_MAGIC) {
@@ -81,6 +114,28 @@ autoscript (ulong addr)
 		return 1;
 	}
 
+#ifdef CONFIG_GENERIC_MMC
+    if (mmc_boot == 1)
+    {
+        char hex_str[12];
+
+        /* copy image (Header(script)+ data+ header(kernel image)) to RAM from emmc */
+        addr_align = addr & 0xFFFFFE00; /* allign to mmc block size*/
+        addr_gap   = addr & 0x1FF;      /* gap after alignment*/
+        /* printf("[DEBUG] addr:0x%X, addr_align:0x%X, addr_gap:0x%X \n",addr,addr_align,addr_gap); */
+        len  = ntohl(hdr->ih_size) + sizeof(image_header_t) + addr_gap + sizeof(image_header_t) + 40 ; /* Gap + Image Data Size + Header Size + 40 byte extra for image list*/
+        /* printf("[DEBUG] mmc_read (header) from:0x%X to:0x%X len:0x%X\n",addr_align,(uchar*)CFG_EMMC_LOAD_ADDR, len); */
+        /*printf ("[Debug-Uboot] Copy Script image from emmc 0x%0.8X to RAM 0x%0.8X ,length=%d, gap=%d \n",addr_align,(uchar*)CFG_EMMC_LOAD_ADDR, len , addr_gap);*/
+        mmc_read(CONFIG_SYS_MMC_IMG_DEV, addr_align, (uchar*)CFG_EMMC_LOAD_ADDR, len);
+        addr = CFG_EMMC_LOAD_ADDR+addr_gap; /* set addr to new position in DDR */
+        /* printf("[DEBUG] re-set addr to 0x%X\n",addr); */
+        sprintf (hex_str, "0x%0.8X", addr);
+        setenv ("UBFIADDR_MMC", hex_str);
+        /*printf ("[Debug-Uboot] set UBFIADDR_MMC to 0x%0.8X\n",addr);*/
+    }
+#endif
+
+	/* set pointer to start of data part (script) */
 	data = addr + sizeof(image_header_t);
 	len = ntohl(hdr->ih_size);
 
@@ -95,31 +150,97 @@ autoscript (ulong addr)
 		puts ("Bad image type\n");
 		return 1;
 	}
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Lock the HW Mutex */
+    if ((data >= CFG_FLASH_BASE) && (data < (CFG_FLASH_BASE + CFG_FLASH_SIZE)))
+    {
+        if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+        {
+            puts("autoscript: Failed to lock HW Mutex\n");
+            return 1;
+        }
+        mutex_on = 1;
+    }
+#endif
 
 	/* get length of script */
 	len_ptr = (ulong *)data;
+    len = ntohl(*len_ptr);
 
-	if ((len = ntohl(*len_ptr)) == 0) {
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Release HW Mutes */
+    if (mutex_on == 1)
+    {
+        hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+        mutex_on = 0;
+    }
+#endif
+
+	if (len == 0) {
 		puts ("Empty Script\n");
-		return 1;
+		return 1; 
 	}
 
 	debug ("** Script length: %ld\n", len);
 
 	if ((cmd = malloc (len + 1)) == NULL) {
-		return 1;
+		return 1; 
 	}
+#if defined(CONFIG_USE_HW_MUTEX)
+    if ((len_ptr >= CFG_FLASH_BASE) && (len_ptr < (CFG_FLASH_BASE + CFG_FLASH_SIZE)))
+    {
+        /* Lock the HW Mutex */
+        if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+        {
+            puts("autoscript: Failed to lock HW Mutex\n");
+            return 1;
+        }
+        mutex_on = 1;
+    }
+#endif
 
 	while (*len_ptr++);
+
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Release HW Mutes */
+    if (mutex_on == 1)
+    {
+        hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+        mutex_on = 0;
+    }
+#endif
 
 	/* make sure cmd is null terminated */
 	memmove (cmd, (char *)len_ptr, len);
 	*(cmd + len) = 0;
 
 #ifdef CFG_HUSH_PARSER /*?? */
-	rcode = parse_string_outer (cmd, FLAG_PARSE_SEMICOLON);
+#if defined(CONFIG_USE_HW_MUTEX)
+    if ((len_ptr >= CFG_FLASH_BASE) && (len_ptr < (CFG_FLASH_BASE + CFG_FLASH_SIZE)))
+    {
+        /* Lock the HW Mutex */
+        if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+        {
+            puts("autoscript: Failed to lock HW Mutex\n");
+            return 1;
+        }
+        mutex_on = 1;
+    }
+#endif
+    rcode = parse_string_outer (cmd, FLAG_PARSE_SEMICOLON);
+
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Release HW Mutes */
+    if (mutex_on == 1)
+    {
+        hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+        mutex_on = 0;
+    }
+#endif
+
+	
 #else
-	{
+    {
 		char *line = cmd;
 		char *next = cmd;
 

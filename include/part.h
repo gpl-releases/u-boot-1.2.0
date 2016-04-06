@@ -20,6 +20,12 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
  * MA 02111-1307 USA
  */
+
+ /* 
+ * Includes Intel Corporation's changes/modifications dated: 2011. 
+ * Changed/modified portions - Copyright © 2011 - 2012, Intel Corporation.   
+ */ 
+
 #ifndef _PART_H
 #define _PART_H
 #include <ide.h>
@@ -44,6 +50,14 @@ typedef struct block_dev_desc {
 				      unsigned long start,
 				      lbaint_t blkcnt,
 				      unsigned long *buffer);
+    unsigned long   (*block_write)(int dev,
+                                   unsigned long start,
+                                   lbaint_t blkcnt,
+                                   const void *buffer);
+    unsigned long   (*block_erase)(int dev,
+                                   unsigned long start,
+                                   lbaint_t blkcnt);
+
 }block_dev_desc_t;
 
 /* Interface types: */
@@ -102,6 +116,8 @@ int   test_part_mac (block_dev_desc_t *dev_desc);
 int get_partition_info_dos (block_dev_desc_t * dev_desc, int part, disk_partition_t *info);
 void print_part_dos (block_dev_desc_t *dev_desc);
 int   test_part_dos (block_dev_desc_t *dev_desc);
+void backup_partition_info_dos (block_dev_desc_t *dev_desc,int *buff_size, char *dest_buff);
+void restore_partition_info_dos(block_dev_desc_t *dev_desc,int *buff_size, char *dest_buff);
 #endif
 
 #ifdef CONFIG_ISO_PARTITION

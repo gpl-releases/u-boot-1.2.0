@@ -24,6 +24,11 @@
  * MA 02111-1307 USA
  */
 
+ /* 
+ * Includes Intel Corporation's changes/modifications dated: 2011. 
+ * Changed/modified portions - Copyright © 2011 , Intel Corporation.   
+ */ 
+
 /**************************************************************************
  *
  * Support for persistent environment data
@@ -57,8 +62,9 @@ DECLARE_GLOBAL_DATA_PTR;
     !defined(CFG_ENV_IS_IN_FLASH)	&& \
     !defined(CFG_ENV_IS_IN_DATAFLASH)	&& \
     !defined(CFG_ENV_IS_IN_NAND)	&& \
+    !defined(CONFIG_ENV_IS_IN_MMC)		&& \
     !defined(CFG_ENV_IS_NOWHERE)
-# error Define one of CFG_ENV_IS_IN_{NVRAM|EEPROM|FLASH|DATAFLASH|NOWHERE}
+# error Define one of CFG_ENV_IS_IN_{NVRAM|EEPROM|FLASH|DATAFLASH|NOWHERE|MMC}
 #endif
 
 #define XMK_STR(x)	#x
@@ -536,10 +542,8 @@ int getenv_r (char *name, char *buf, unsigned len)
 }
 
 #if defined(CFG_ENV_IS_IN_NVRAM) || defined(CFG_ENV_IS_IN_EEPROM) || \
-    ((CONFIG_COMMANDS & (CFG_CMD_ENV|CFG_CMD_FLASH)) == \
-      (CFG_CMD_ENV|CFG_CMD_FLASH)) || \
-    ((CONFIG_COMMANDS & (CFG_CMD_ENV|CFG_CMD_NAND)) == \
-      (CFG_CMD_ENV|CFG_CMD_NAND))
+    ((CONFIG_COMMANDS & (CFG_CMD_ENV|CFG_CMD_FLASH)) == (CFG_CMD_ENV|CFG_CMD_FLASH)) || \
+    ((CONFIG_COMMANDS & (CFG_CMD_ENV|CFG_CMD_NAND))  == (CFG_CMD_ENV|CFG_CMD_NAND)) 
 int do_saveenv (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 {
 	extern char * env_name_spec;

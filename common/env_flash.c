@@ -24,6 +24,11 @@
  * MA 02111-1307 USA
  */
 
+/* 
+ * Includes Intel Corporation's changes/modifications dated: 2011. 
+ * Changed/modified portions - Copyright © 2011 , Intel Corporation.   
+ */ 
+
 /* #define DEBUG */
 
 #include <common.h>
@@ -35,6 +40,11 @@
 #include <linux/stddef.h>
 #include <malloc.h>
 
+#if defined(CONFIG_USE_HW_MUTEX)
+#include <puma6_hw_mutex.h>
+#endif
+
+
 DECLARE_GLOBAL_DATA_PTR;
 
 #if ((CONFIG_COMMANDS&(CFG_CMD_ENV|CFG_CMD_FLASH)) == (CFG_CMD_ENV|CFG_CMD_FLASH))
@@ -43,69 +53,138 @@ DECLARE_GLOBAL_DATA_PTR;
 #error Cannot use CFG_ENV_ADDR_REDUND without CFG_CMD_ENV & CFG_CMD_FLASH
 #endif
 
-#if defined(CFG_ENV_SIZE_REDUND) && (CFG_ENV_SIZE_REDUND < CFG_ENV_SIZE)
-#error CFG_ENV_SIZE_REDUND should not be less then CFG_ENV_SIZE
-#endif
-
 #ifdef CONFIG_INFERNO
 # ifdef CFG_ENV_ADDR_REDUND
 #error CFG_ENV_ADDR_REDUND is not implemented for CONFIG_INFERNO
 # endif
 #endif
 
-char * env_name_spec = "Flash";
+char * env_flash_name_spec = "Flash";
 
 #ifdef ENV_IS_EMBEDDED
 
-extern uchar environment[];
-env_t *env_ptr = (env_t *)(&environment[0]);
-
 #ifdef CMD_SAVEENV
 /* static env_t *flash_addr = (env_t *)(&environment[0]);-broken on ARM-wd-*/
+#ifndef CONFIG_SPI_FLASH
 static env_t *flash_addr = (env_t *)CFG_ENV_ADDR;
+#else
+static env_t *flash_addr = NULL;
+#endif
 #endif
 
 #else /* ! ENV_IS_EMBEDDED */
 
-env_t *env_ptr = (env_t *)CFG_ENV_ADDR;
 #ifdef CMD_SAVEENV
+#ifndef CONFIG_SPI_FLASH
 static env_t *flash_addr = (env_t *)CFG_ENV_ADDR;
+#else
+static env_t *flash_addr = NULL;
+#endif
 #endif
 
 #endif /* ENV_IS_EMBEDDED */
 
-#ifdef CFG_ENV_ADDR_REDUND
-static env_t *flash_addr_new = (env_t *)CFG_ENV_ADDR_REDUND;
+extern env_t *env_ptr;
 
+#ifdef CFG_ENV_ADDR_REDUND
+#ifndef CONFIG_SPI_FLASH
+static env_t *flash_addr_new = (env_t *)CFG_ENV_ADDR_REDUND;
+#else
+static env_t *flash_addr_new = NULL;
+#endif
+
+#ifndef CONFIG_SPI_FLASH
 /* CFG_ENV_ADDR is supposed to be on sector boundary */
 static ulong end_addr = CFG_ENV_ADDR + CFG_ENV_SECT_SIZE - 1;
 static ulong end_addr_new = CFG_ENV_ADDR_REDUND + CFG_ENV_SECT_SIZE - 1;
+#else
+static ulong end_addr = 0;
+static ulong end_addr_new = 0;
+#endif
 
 #define ACTIVE_FLAG   1
 #define OBSOLETE_FLAG 0
 #endif /* CFG_ENV_ADDR_REDUND */
 
 extern uchar default_environment[];
-extern int default_environment_size;
+//extern int default_environment_size;
 
 
-uchar env_get_char_spec (int index)
+uchar env_flash_get_char_spec (int index)
 {
-	return ( *((uchar *)(gd->env_addr + index)) );
+    char c;
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Lock the HW Mutex */
+    if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+    {
+        printf("Error: env_get_char_spec - failed to lock HW Mutex\n");
+        return 0;
+    }
+#endif
+
+    c = *((uchar *)(gd->env_addr + index));
+
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Release HW Mutes */
+    hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+#endif
+	return c;
 }
 
 #ifdef CFG_ENV_ADDR_REDUND
 
-int  env_init(void)
+#ifdef CONFIG_SPI_FLASH
+extern int flash_addr_init(int i,int verbose);
+
+void addr_init(void)
+{
+	if( flash_addr_init(0,0) < 0)
+		return;
+
+	/* Initialize flash addresses */
+	env_ptr = (env_t *)CFG_ENV_ADDR;
+	flash_addr = (env_t *)CFG_ENV_ADDR;
+	flash_addr_new = (env_t *)CFG_ENV_ADDR_REDUND;
+
+	end_addr = CFG_ENV_ADDR + CFG_ENV_SECT_SIZE - 1;
+	end_addr_new = CFG_ENV_ADDR_REDUND + CFG_ENV_SECT_SIZE - 1;
+}
+#endif
+
+int  env_flash_init(void)
 {
 	int crc1_ok = 0, crc2_ok = 0;
+	uchar flag1;
+	uchar flag2;
 
-	uchar flag1 = flash_addr->flags;
-	uchar flag2 = flash_addr_new->flags;
+	ulong addr_default;
+	ulong addr1;
+	ulong addr2;
 
-	ulong addr_default = (ulong)&default_environment[0];
-	ulong addr1 = (ulong)&(flash_addr->data);
-	ulong addr2 = (ulong)&(flash_addr_new->data);
+#ifdef CONFIG_SPI_FLASH
+	addr_init();
+#endif
+
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Lock the HW Mutex */
+    if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+    {
+        printf("Error: env_init - failed to lock HW Mutex\n");
+
+        /* If mutex failed use default values */
+        gd->env_addr  = (ulong)&default_environment[0];
+		gd->env_valid = 0;
+        return 0;
+    }
+#endif
+
+    /* Read Flasgs from Flash - Use Mutex*/
+	flag1 = flash_addr->flags;
+	flag2 = flash_addr_new->flags;
+
+	addr_default = (ulong)&default_environment[0];
+	addr1 = (ulong)&(flash_addr->data);
+	addr2 = (ulong)&(flash_addr_new->data);
 
 #ifdef CONFIG_OMAP2420H4
 	int flash_probe(void);
@@ -114,8 +193,15 @@ int  env_init(void)
 		goto bad_flash;
 #endif
 
+    /* Read the expected CRC from flash, and calculated the actual CRC */ 
 	crc1_ok = (crc32(0, flash_addr->data, ENV_SIZE) == flash_addr->crc);
 	crc2_ok = (crc32(0, flash_addr_new->data, ENV_SIZE) == flash_addr_new->crc);
+
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Release HW Mutes */
+    hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+#endif
+
 
 	if (crc1_ok && ! crc2_ok) {
 		gd->env_addr  = addr1;
@@ -150,14 +236,15 @@ bad_flash:
 }
 
 #ifdef CMD_SAVEENV
-int saveenv(void)
+int env_flash_saveenv(void)
 {
 	char *saved_data = NULL;
 	int rc = 1;
 	char flag = OBSOLETE_FLAG, new_flag = ACTIVE_FLAG;
-#if CFG_ENV_SECT_SIZE > CFG_ENV_SIZE
 	ulong up_data = 0;
-#endif
+
+	debug( "CFG_ENV_ADDR = 0x%x, CFG_ENV_SECT_SIZE = 0x%x\n", CFG_ENV_ADDR, CFG_ENV_SECT_SIZE );
+	debug( "end_addr = 0x%x, end_addr_new = 0x%x, flash_addr = 0x%x\n", end_addr, end_addr_new, flash_addr );
 
 	debug ("Protect off %08lX ... %08lX\n",
 		(ulong)flash_addr, end_addr);
@@ -173,22 +260,24 @@ int saveenv(void)
 		goto Done;
 	}
 
-#if CFG_ENV_SECT_SIZE > CFG_ENV_SIZE
-	up_data = (end_addr_new + 1 - ((long)flash_addr_new + CFG_ENV_SIZE));
-	debug ("Data to save 0x%x\n", up_data);
-	if (up_data) {
-		if ((saved_data = malloc(up_data)) == NULL) {
-			printf("Unable to save the rest of sector (%ld)\n",
-				up_data);
-			goto Done;
+	if( CFG_ENV_SECT_SIZE > CFG_ENV_SIZE )
+	{
+		up_data = (end_addr_new + 1 - ((long)flash_addr_new + CFG_ENV_SIZE));
+		debug ("Data to save 0x%x\n", up_data);
+		if (up_data) {
+			if ((saved_data = malloc(up_data)) == NULL) {
+				printf("Unable to save the rest of sector (%ld)\n",
+					up_data);
+				goto Done;
+			}
+			memcpy(saved_data,
+				(void *)((long)flash_addr_new + CFG_ENV_SIZE), up_data);
+			debug ("Data (start 0x%x, len 0x%x) saved at 0x%x\n",
+				   (long)flash_addr_new + CFG_ENV_SIZE,
+					up_data, saved_data);
 		}
-		memcpy(saved_data,
-			(void *)((long)flash_addr_new + CFG_ENV_SIZE), up_data);
-		debug ("Data (start 0x%x, len 0x%x) saved at 0x%x\n",
-			   (long)flash_addr_new + CFG_ENV_SIZE,
-				up_data, saved_data);
 	}
-#endif
+
 	puts ("Erasing Flash...");
 	debug (" %08lX ... %08lX ...",
 		(ulong)flash_addr_new, end_addr_new);
@@ -201,9 +290,12 @@ int saveenv(void)
 	debug (" %08lX ... %08lX ...",
 		(ulong)&(flash_addr_new->data),
 		sizeof(env_ptr->data)+(ulong)&(flash_addr_new->data));
+
+	debug( "env_ptr->data=%p, &(flash_addr_new->data)=%p, ENV_SIZE=0x%x\n", env_ptr->data, &(flash_addr_new->data), ENV_SIZE );
+
 	if ((rc = flash_write((char *)env_ptr->data,
 			(ulong)&(flash_addr_new->data),
-			sizeof(env_ptr->data))) ||
+			ENV_SIZE)) ||
 	    (rc = flash_write((char *)&(env_ptr->crc),
 			(ulong)&(flash_addr_new->crc),
 			sizeof(env_ptr->crc))) ||
@@ -219,18 +311,20 @@ int saveenv(void)
 	}
 	puts ("done\n");
 
-#if CFG_ENV_SECT_SIZE > CFG_ENV_SIZE
-	if (up_data) { /* restore the rest of sector */
-		debug ("Restoring the rest of data to 0x%x len 0x%x\n",
-			   (long)flash_addr_new + CFG_ENV_SIZE, up_data);
-		if (flash_write(saved_data,
-				(long)flash_addr_new + CFG_ENV_SIZE,
-				up_data)) {
-			flash_perror(rc);
-			goto Done;
+	if( CFG_ENV_SECT_SIZE > CFG_ENV_SIZE )
+	{
+		if (up_data) { /* restore the rest of sector */
+			debug ("Restoring the rest of data to 0x%x len 0x%x\n",
+				   (long)flash_addr_new + CFG_ENV_SIZE, up_data);
+			if (flash_write(saved_data,
+					(long)flash_addr_new + CFG_ENV_SIZE,
+					up_data)) {
+				flash_perror(rc);
+				goto Done;
+			}
 		}
 	}
-#endif
+
 	{
 		env_t * etmp = flash_addr;
 		ulong ltmp = end_addr;
@@ -257,7 +351,7 @@ Done:
 
 #else /* ! CFG_ENV_ADDR_REDUND */
 
-int  env_init(void)
+int  env_flash_init(void)
 {
 #ifdef CONFIG_OMAP2420H4
 	int flash_probe(void);
@@ -280,7 +374,7 @@ bad_flash:
 
 #ifdef CMD_SAVEENV
 
-int saveenv(void)
+int env_flash_saveenv(void)
 {
 	int	len, rc;
 	ulong	end_addr;
@@ -293,28 +387,31 @@ int saveenv(void)
 #endif	/* CFG_ENV_SECT_SIZE */
 	int rcode = 0;
 
-#if defined(CFG_ENV_SECT_SIZE) && (CFG_ENV_SECT_SIZE > CFG_ENV_SIZE)
+	if(CFG_ENV_SECT_SIZE > CFG_ENV_SIZE)
+	{
 
-	flash_offset    = ((ulong)flash_addr) & (CFG_ENV_SECT_SIZE-1);
-	flash_sect_addr = ((ulong)flash_addr) & ~(CFG_ENV_SECT_SIZE-1);
+		flash_offset    = ((ulong)flash_addr) & (CFG_ENV_SECT_SIZE-1);
+		flash_sect_addr = ((ulong)flash_addr) & ~(CFG_ENV_SECT_SIZE-1);
 
-	debug ( "copy old content: "
-		"sect_addr: %08lX  env_addr: %08lX  offset: %08lX\n",
-		flash_sect_addr, (ulong)flash_addr, flash_offset);
+		debug ( "copy old content: "
+			"sect_addr: %08lX  env_addr: %08lX  offset: %08lX\n",
+			flash_sect_addr, (ulong)flash_addr, flash_offset);
 
-	/* copy old contents to temporary buffer */
-	memcpy (env_buffer, (void *)flash_sect_addr, CFG_ENV_SECT_SIZE);
+		/* copy old contents to temporary buffer */
+		memcpy (env_buffer, (void *)flash_sect_addr, CFG_ENV_SECT_SIZE);
 
-	/* copy current environment to temporary buffer */
-	memcpy ((uchar *)((unsigned long)env_buffer + flash_offset),
-		env_ptr,
-		CFG_ENV_SIZE);
+		/* copy current environment to temporary buffer */
+		memcpy ((uchar *)((unsigned long)env_buffer + flash_offset),
+			env_ptr,
+			CFG_ENV_SIZE);
 
-	len	 = CFG_ENV_SECT_SIZE;
-#else
-	flash_sect_addr = (ulong)flash_addr;
-	len	 = CFG_ENV_SIZE;
-#endif	/* CFG_ENV_SECT_SIZE */
+		len	 = CFG_ENV_SECT_SIZE;
+	}
+	else
+	{
+		flash_sect_addr = (ulong)flash_addr;
+		len	 = CFG_ENV_SIZE;
+	}
 
 #ifndef CONFIG_INFERNO
 	end_addr = flash_sect_addr + len - 1;
@@ -352,9 +449,19 @@ int saveenv(void)
 
 #endif /* CFG_ENV_ADDR_REDUND */
 
-void env_relocate_spec (void)
+void env_flash_relocate_spec (void)
 {
 #if !defined(ENV_IS_EMBEDDED) || defined(CFG_ENV_ADDR_REDUND)
+
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Lock the HW Mutex */
+    if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+    {
+        printf("Error: env_flash_relocate_spec - failed to lock HW Mutex\n");
+        return;
+    }
+#endif
+
 #ifdef CFG_ENV_ADDR_REDUND
 	if (gd->env_addr != (ulong)&(flash_addr->data)) {
 		env_t * etmp = flash_addr;
@@ -367,6 +474,7 @@ void env_relocate_spec (void)
 		end_addr_new = ltmp;
 	}
 
+    /* If Env Redund is CRC valid but not obsolete, then make it obsolete */
 	if (flash_addr_new->flags != OBSOLETE_FLAG &&
 	    crc32(0, flash_addr_new->data, ENV_SIZE) ==
 	    flash_addr_new->crc) {
@@ -380,6 +488,8 @@ void env_relocate_spec (void)
 		flash_sect_protect (1, (ulong)flash_addr_new, end_addr_new);
 	}
 
+    /* if Env Flag is equal Activ, but others bit are also set,
+       then clear the other bits, and make it Active only */
 	if (flash_addr->flags != ACTIVE_FLAG &&
 	    (flash_addr->flags & ACTIVE_FLAG) == ACTIVE_FLAG) {
 		char flag = ACTIVE_FLAG;
@@ -397,6 +507,12 @@ void env_relocate_spec (void)
 		      "reading environment; recovered successfully\n\n");
 #endif /* CFG_ENV_ADDR_REDUND */
 	memcpy (env_ptr, (void*)flash_addr, CFG_ENV_SIZE);
+
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Release HW Mutes */
+    hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+#endif
+
 #endif /* ! ENV_IS_EMBEDDED || CFG_ENV_ADDR_REDUND */
 }
 

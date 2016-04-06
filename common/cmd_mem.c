@@ -21,6 +21,11 @@
  * MA 02111-1307 USA
  */
 
+ /* 
+ * Includes Intel Corporation's changes/modifications dated: 2011. 
+ * Changed/modified portions - Copyright © 2011 , Intel Corporation.   
+ */ 
+
 /*
  * Memory Functions
  *
@@ -35,7 +40,9 @@
 #ifdef CONFIG_HAS_DATAFLASH
 #include <dataflash.h>
 #endif
-
+#if defined(CONFIG_USE_HW_MUTEX)
+#include <puma6_hw_mutex.h>
+#endif
 #if (CONFIG_COMMANDS & (CFG_CMD_MEMORY	| \
 			CFG_CMD_I2C	| \
 			CFG_CMD_ITEST	| \
@@ -142,6 +149,9 @@ int do_mem_md ( cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 #ifdef CONFIG_HAS_DATAFLASH
 		int rc;
 #endif
+#if defined(CONFIG_USE_HW_MUTEX)
+        int mutex_on = 0;
+#endif
 		printf("%08lx:", addr);
 		linebytes = (nbytes>DISP_LINE_LEN)?DISP_LINE_LEN:nbytes;
 
@@ -165,6 +175,20 @@ int do_mem_md ( cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 
 		} else {	/* addr does not correspond to DataFlash */
 #endif
+        
+#if defined(CONFIG_USE_HW_MUTEX)
+        /* Lock the HW Mutex */
+        if ( ((addr >= CFG_FLASH_BASE) && (addr < (CFG_FLASH_BASE + CFG_FLASH_SIZE))) ||
+             ((addr <  CFG_FLASH_BASE) && ((addr+linebytes) >= CFG_FLASH_BASE))        )
+        {
+            if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+            {
+                printf("Failed to lock HW Mutex\n");
+                return 0;
+            }
+            mutex_on = 1;
+        }
+#endif
 		for (i=0; i<linebytes; i+= size) {
 			if (size == 4) {
 				printf(" %08x", (*uip++ = *((uint *)addr)));
@@ -175,6 +199,14 @@ int do_mem_md ( cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 			}
 			addr += size;
 		}
+#if defined(CONFIG_USE_HW_MUTEX)
+        /* Release HW Mutes */
+        if (mutex_on == 1)
+        {
+            hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+            mutex_on = 0;
+        }
+#endif
 #ifdef CONFIG_HAS_DATAFLASH
 		}
 #endif
@@ -318,13 +350,16 @@ int do_mem_cmp (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	ulong	addr1, addr2, count, ngood;
 	int	size;
 	int     rcode = 0;
+#if defined(CONFIG_USE_HW_MUTEX)
+    int mutex_on = 0;
+#endif 
 
 	if (argc != 4) {
 		printf ("Usage:\n%s\n", cmdtp->usage);
 		return 1;
 	}
 
-	/* Check for size specification.
+    /* Check for size specification.
 	*/
 	if ((size = cmd_get_data_size(argv[0], 4)) < 0)
 		return 1;
@@ -342,6 +377,22 @@ int do_mem_cmp (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 		puts ("Comparison with DataFlash space not supported.\n\r");
 		return 0;
 	}
+#endif
+
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Lock the HW Mutex */
+    if ( ((addr1 >= CFG_FLASH_BASE) && (addr1 < (CFG_FLASH_BASE + CFG_FLASH_SIZE))) ||
+         ((addr1 <  CFG_FLASH_BASE) && ((addr1+count) >= CFG_FLASH_BASE))            ||
+         ((addr2 >= CFG_FLASH_BASE) && (addr2 < (CFG_FLASH_BASE + CFG_FLASH_SIZE))) ||
+         ((addr2 <  CFG_FLASH_BASE) && ((addr2+count) >= CFG_FLASH_BASE))            )
+    {
+        if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+        {
+            printf("Failed to lock HW Mutex\n");
+            return 0;
+        }
+        mutex_on = 1;
+    }
 #endif
 
 	ngood = 0;
@@ -385,6 +436,15 @@ int do_mem_cmp (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 		addr2 += size;
 	}
 
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Release HW Mutes */
+    if (mutex_on == 1)
+    {
+        hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+        mutex_on = 0;
+    }
+#endif
+
 	printf("Total of %ld %s%s were the same\n",
 		ngood, size == 4 ? "word" : size == 2 ? "halfword" : "byte",
 		ngood == 1 ? "" : "s");
@@ -395,6 +455,9 @@ int do_mem_cp ( cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 {
 	ulong	addr, dest, count;
 	int	size;
+#if defined(CONFIG_USE_HW_MUTEX)
+    int mutex_on = 0;
+#endif
 
 	if (argc != 4) {
 		printf ("Usage:\n%s\n", cmdtp->usage);
@@ -440,6 +503,7 @@ int do_mem_cp ( cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	}
 #endif
 
+#ifndef CONFIG_SYSTEM_PUMA6_SOC /*(DISABLED FOR PUMA6)*/
 #if (CONFIG_COMMANDS & CFG_CMD_MMC)
 	if (mmc2info(dest)) {
 		int rc;
@@ -479,6 +543,7 @@ int do_mem_cp ( cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 		return 0;
 	}
 #endif
+#endif /*CONFIG_SYSTEM_PUMA6_SOC*/
 
 #ifdef CONFIG_HAS_DATAFLASH
 	/* Check if we are copying from RAM or Flash to DataFlash */
@@ -513,6 +578,20 @@ int do_mem_cp ( cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 		return 1;
 	}
 #endif
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Check if we are copying from Flash to RAM */
+    if ( ((addr >= CFG_FLASH_BASE) && (addr < (CFG_FLASH_BASE + CFG_FLASH_SIZE))) ||
+         ((addr <  CFG_FLASH_BASE) && ((addr + count) >=  CFG_FLASH_BASE))       ) 
+    {
+        /* Lock the HW mutex */
+        if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+        {
+            printf("Failed to lock HW Mutex\n");
+            return 1;
+        }
+        mutex_on = 1;
+    }
+#endif
 
 	while (count-- > 0) {
 		if (size == 4)
@@ -524,6 +603,16 @@ int do_mem_cp ( cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 		addr += size;
 		dest += size;
 	}
+
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Release HW Mutes */
+    if (mutex_on == 1)
+    {
+        hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+        mutex_on = 0;
+    }
+#endif
+
 	return 0;
 }
 
@@ -1115,6 +1204,7 @@ int do_mem_crc (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	addr += base_address;
 
 	length = simple_strtoul (argv[2], NULL, 16);
+
 
 	crc = crc32 (0, (const uchar *) addr, length);
 

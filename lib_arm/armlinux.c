@@ -29,6 +29,9 @@
 #ifdef CONFIG_HAS_DATAFLASH
 #include <dataflash.h>
 #endif
+#if defined(CONFIG_USE_HW_MUTEX)
+#include <puma6_hw_mutex.h>
+#endif
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -90,7 +93,18 @@ void do_bootm_linux (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[],
 	char *commandline = getenv ("bootargs");
 #endif
 
-	theKernel = (void (*)(int, int, uint))ntohl(hdr->ih_ep);
+    theKernel = (void (*)(int, int, uint))ntohl(hdr->ih_ep);
+
+    /*printf ("[Debug-Uboot] theKernel = %p addr = %p\n", theKernel, addr);*/
+
+#if defined(CONFIG_USE_HW_MUTEX)
+            /* Lock the HW Mutex */
+            if (hw_mutex_lock(HW_MUTEX_NOR_SPI) == 0)
+            {
+                puts("Failed to lock HW Mutex\n");
+                return;
+            }
+#endif
 
 	/*
 	 * Check if there is an initrd image
@@ -206,6 +220,11 @@ void do_bootm_linux (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[],
 		len = data = 0;
 	}
 
+#if defined(CONFIG_USE_HW_MUTEX)
+    /* Release HW Mutes */
+    hw_mutex_unlock(HW_MUTEX_NOR_SPI);
+#endif
+
 #ifdef	DEBUG
 	if (!data) {
 		printf ("No initrd\n");
@@ -219,6 +238,8 @@ void do_bootm_linux (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[],
 		initrd_start = 0;
 		initrd_end = 0;
 	}
+
+    /*printf ("[Debug-Uboot] data = %p initrd_start = %p initrd_end = %p\n", data, initrd_start, initrd_end);*/
 
 	SHOW_BOOT_PROGRESS (15);
 
@@ -304,7 +325,7 @@ static void setup_memory_tags (bd_t *bd)
 
 		params->u.mem.start = bd->bi_dram[i].start;
 		params->u.mem.size = bd->bi_dram[i].size;
-
+        /*printf ("[Debug-Uboot] params->u.mem.start = %p  params->u.mem.size = %u\n", params->u.mem.start, params->u.mem.size);*/
 		params = tag_next (params);
 	}
 }
@@ -389,6 +410,8 @@ void setup_serial_tag (struct tag **tmp)
 	params->hdr.size = tag_size (tag_serialnr);
 	params->u.serialnr.low = serialnr.low;
 	params->u.serialnr.high= serialnr.high;
+    /*printf ("[Debug-Uboot] params->u.serialnr.low = %d  params->u.serialnr.high = %d\n", params->u.serialnr.low, params->u.serialnr.high);*/
+
 	params = tag_next (params);
 	*tmp = params;
 }
@@ -404,7 +427,10 @@ void setup_revision_tag(struct tag **in_params)
 	params->hdr.tag = ATAG_REVISION;
 	params->hdr.size = tag_size (tag_revision);
 	params->u.revision.rev = rev;
+    /*printf ("[Debug-Uboot] params->u.revision.rev = %d\n", params->u.revision.rev);*/
 	params = tag_next (params);
+    
+
 }
 #endif  /* CONFIG_REVISION_TAG */
 

@@ -504,7 +504,7 @@ restart:
 		 *	Check for a timeout, and run the timeout handler
 		 *	if we have one.
 		 */
-		if (timeHandler && ((get_timer(0) - timeStart) > timeDelta)) {
+                if (timeHandler && ((get_timer(0) - timeStart) > timeDelta)) {
 			thand_f *x;
 
 #if defined(CONFIG_MII) || (CONFIG_COMMANDS & CFG_CMD_MII)
@@ -523,6 +523,7 @@ restart:
 #endif /* CONFIG_MII, ... */
 			x = timeHandler;
 			timeHandler = (thand_f *)0;
+
 			(*x)();
 		}
 
